@@ -146,12 +146,7 @@ function fillDirSelect(){
   const dirs = dirsForManager();
   sel.innerHTML = `<option value="">— выберите —</option>` + dirs.map(d=>`<option${d===cur?" selected":""}>${esc(d)}</option>`).join("");
 }
-$("#car").onchange = () => {
-  S.car = $("#car").value;
-  if (!S.last) return;
-  if (S.last.kind === "approved") { $("#calcForm").requestSubmit(); return; }
-  recalcLast();
-};
+$("#car").onchange = () => { S.car = $("#car").value; if (S.last) { S.last = null; renderResult(); } };
 $("#dir").onchange = () => { S.last = null; renderResult(); };
 $("#addr").oninput = () => { if (S.last) { S.last = null; renderResult(); } };
 function recalcLast(){
@@ -239,6 +234,7 @@ function renderResult(){
   $("#sStepV").textContent = S.settings.step;
   const set = (id, v) => { $(id).textContent = (v==null || v==="") ? "—" : v; };
   const box = $("#rExtraBox");
+  $("#calcOut").hidden = !r;
   if (!r){
     ["#rBase","#rExtra","#rTotal","#sPlace","#sBase","#sKm","#sState"].forEach(id=>set(id,null));
     $("#rStatus").innerHTML = badge("b-chk","Введите адрес");
