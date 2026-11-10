@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="author" content="Тёмина Юлия">
+  <title>АЗКиФ · Доставка</title>
+  <link rel="icon" href="img/logo.svg">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header>
+  <div class="wrap topbar">
+    <a class="logo" href="#calc"><img class="logo-img" src="img/logo.svg" alt="АЗКиФ — доставка"></a>
+    <nav aria-label="Разделы">
+      <a href="#calc" data-view="calc">Расчёт</a>
+      <a href="#approve" data-view="approve">Согласование <span class="count" id="newCount" hidden>0</span></a>
+      <a href="#trip" data-view="trip">Рейс</a>
+      <a href="#tariffs" data-view="tariffs">Тарифы</a>
+      <a href="#rules" data-view="rules">Правила</a>
+    </nav>
+    <div class="top-right"><span class="env-badge" id="envBadge"><i></i>Склад: Волгоград, ул. Ясноморская, 2</span></div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="banner" id="netNote" hidden></div>
+
+  <!-- MANAGER -->
+  <section class="view" id="v-calc">
+    <div class="calc">
+      <div class="ph">
+        <h1>Стоимость доставки</h1>
+        <div class="ph-sub"><span class="rule"></span>Впишите адрес клиента и выберите машину</div>
+      </div>
+      <form class="card pad" id="calcForm" autocomplete="off">
+        <label class="fl" for="addr">Адрес клиента</label>
+        <input class="inp big" id="addr" placeholder="Например: Яшкуль, ул. Ленина, 5" required>
+        <div class="hint">Достаточно населённого пункта. Улица и дом — по желанию.</div>
+        <div class="cars" role="group" aria-label="Машина">
+          <button type="button" class="car" data-car="gazel" aria-pressed="true"><b>Газель</b><span>до 2 т, до 6 м</span></button>
+          <button type="button" class="car" data-car="gazon" aria-pressed="false"><b>Газон</b><span>до 5 т, до 7,5 м</span></button>
+        </div>
+        <button class="btn primary big go" id="goBtn" type="submit">Рассчитать</button>
+      </form>
+      <div class="result" id="result" hidden></div>
+
+      <div class="mine">
+        <h2>Мои запросы на согласование</h2>
+        <div class="list" id="mineList"><div class="empty">Здесь появятся адреса, отправленные логисту, и его ответ.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- APPROVALS -->
+  <section class="view" id="v-approve" hidden>
+    <div class="ph">
+      <h1>Согласование цен</h1>
+      <div class="ph-sub"><span class="rule"></span>Адреса, которых нет в прайсе или где доп. пробег больше порога</div>
+    </div>
+    <div class="seg" role="group" aria-label="Фильтр">
+      <button type="button" data-rf="new" aria-pressed="true">Ждут ответа</button>
+      <button type="button" data-rf="done" aria-pressed="false">Решённые</button>
+    </div>
+    <div class="reqs" id="reqList"></div>
+  </section>
+
+  <!-- TRIP (logist calculator) -->
+  <section class="view" id="v-trip" hidden>
+    <div class="ph">
+      <h1>Калькулятор рейса</h1>
+      <div class="ph-sub"><span class="rule"></span>Для логиста: сборные заказы, заезды в сторону и продолжение маршрута</div>
+    </div>
+    <div class="trip">
+      <form class="card pad trip-form" id="tripForm" autocomplete="off">
+        <div class="g2">
+          <div><label class="fl" for="tDir">Направление</label><select class="inp" id="tDir"></select></div>
+          <div><label class="fl" for="tBase">Опорный пункт из прайса</label><select class="inp" id="tBase"></select></div>
+        </div>
+        <label class="fl">Машина</label>
+        <div class="seg wide" data-group="tCar"><button type="button" data-v="gazel" aria-pressed="true">Газель</button><button type="button" data-v="gazon" aria-pressed="false">Газон</button></div>
+        <label class="fl">Формат рейса</label>
+        <div class="seg wide" data-group="tFmt"><button type="button" data-v="regular" aria-pressed="true">Постоянный</button><button type="button" data-v="orders" aria-pressed="false">Под заказы</button></div>
+        <label class="fl">Тип отклонения</label>
+        <div class="seg wide" data-group="tType"><button type="button" data-v="way" aria-pressed="false">По пути</button><button type="button" data-v="dead" aria-pressed="true">Заезд с возвратом</button><button type="button" data-v="cont" aria-pressed="false">Продолжение маршрута</button></div>
+        <div class="hint" id="tTypeHint"></div>
+        <label class="fl" for="tKm">Км от опорной точки до адреса, в одну сторону</label>
+        <input class="inp" id="tKm" type="number" min="0" step="1" value="0">
+
+        <details class="auto" id="tAuto">
+          <summary>Определить расстояние автоматически</summary>
+          <div class="auto-b">
+            <div><label class="fl" for="tAddr">Адрес клиента</label><input class="inp" id="tAddr" placeholder="Большой Царын, ул. Карла Маркса, 24"></div>
+            <div><label class="fl" for="tNext">Следующая остановка после клиента <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:500">— необязательно</span></label><input class="inp" id="tNext" placeholder="Например: Кетченеры"></div>
+            <div class="note">Без следующей остановки считается расстояние от опорной точки до клиента, как в прайсе. Если остановка задана — разница маршрутов «точка → клиент → остановка» и «точка → остановка».</div>
+            <div class="row"><button type="button" class="btn" id="tAutoBtn">Рассчитать расстояние</button><span class="note" id="tAutoState"></span></div>
+          </div>
+        </details>
+
+        <label class="fl" for="tNote">Примечание логиста</label>
+        <textarea class="inp" id="tNote" placeholder="Например: расстояние введено вручную по дорожному маршруту"></textarea>
+        <div class="note" id="tParams"></div>
+      </form>
+      <div class="trip-side"><div class="res" id="tripRes"></div></div>
+    </div>
+  </section>
+
+  <!-- RULES -->
+  <section class="view" id="v-rules" hidden>
+    <div class="ph">
+      <h1>Правила расчёта</h1>
+      <div class="ph-sub"><span class="rule"></span>Логика и границы применения</div>
+    </div>
+    <div class="rules">
+      <div class="card"><div class="pad"><h3>Принцип расчёта</h3></div>
+        <div class="rl"><b>Адрес в прайсе</b><span>Фиксированная цена из утверждённого прайса.</span></div>
+        <div class="rl"><b>Адрес вне прайса</b><span>Все направления, кроме Волгограда. СНТ, дачные массивы, посёлки и прочие удалённые точки: тариф ближайшего пункта из основного списка + <span class="js-rate">60</span> ₽ за 1 км пробега по маршруту. Км — по навигатору от ближайшего пункта до адреса получателя. Округление вверх до <span class="js-step">100</span> ₽.</span></div>
+        <div class="rl"><b>Волгоград</b><span>Только фиксированные тарифы из прайса. Доплата за километры не применяется: адреса вне городского списка — по согласованию с логистом.</span></div>
+        <div class="rl"><b>Нестандартные адреса</b><span>Предварительная цена до подтверждения логистом.</span></div>
+      </div>
+      <div class="card"><div class="pad"><h3>Правила</h3></div>
+        <div class="rl"><b>1. Основа</b><span>Тариф относится к одному заказу; выбираются направление, опорный пункт, Газель или Газон.</span></div>
+        <div class="rl"><b>2. Адрес в прайсе</b><span>Для самой точки из прайса выбирается «По пути» и отклонение 0 км.</span></div>
+        <div class="rl"><b>3. Попутный адрес</b><span>Если объезд отсутствует, дополнительный пробег = 0 км.</span></div>
+        <div class="rl"><b>4. Заезд с возвратом</b><span>Доп. пробег = расстояние от опорной точки до адреса × 2.</span></div>
+        <div class="rl"><b>5. Продолжение</b><span>Доп. пробег = расстояние в одну сторону, только если маршрут не требует возврата.</span></div>
+        <div class="rl"><b>6. Формула</b><span>Базовый тариф + дополнительный пробег × ставка. Округление вверх по шагу.</span></div>
+        <div class="rl"><b>7. Постоянный рейс</b><span>Можно выдать расчётный тариф при корректно введённом расстоянии и пороге.</span></div>
+        <div class="rl"><b>8. Рейс под заказы</b><span>Стоимость предварительная: требуется проверить реальный объезд и распределение между заказами.</span></div>
+        <div class="rl"><b>9. Согласование</b><span>Если доп. пробег превышает порог (сейчас <span class="js-thr">40</span> км), тариф требует проверки логистом.</span></div>
+        <div class="rl"><b>10. Ограничение</b><span>Нет карт и навигатора: расстояние для адресов вне прайса оценивается автоматически и может отличаться от реального. Нет распределения доплаты между заказами и проверки маржи.</span></div>
+      </div>
+      <div class="card"><div class="pad"><h3>Схема Ростовского направления</h3></div>
+        <div class="rl"><b>Основная ветка</b><span>Волгоград → Новый Рогачик → Калач → Суровикино → Обливская → Морозовск → Белая Калитва → Лиховской → Шахты → Новочеркасск → Аксай → Ростов-на-Дону → Батайск → Зерноград</span></div>
+        <div class="rl"><b>Западные пункты</b><span>Советская, Боковская, Вешенская, Кашары, Миллерово, Чертково, Глубокий, Каменск-Шахтинский, Донецк; у Шахт — Новошахтинск</span></div>
+        <div class="rl"><b>Вторая ветка</b><span>Волгоград → Червлёное → Абганерово → Октябрьский → Котельниково → Дубовское → Волгодонск → Семикаракорск → Багаевская, Егорлыкская</span></div>
+        <div class="rl"><b>Третья ветка</b><span>Зимовники → Пролетарск → Сальск → Песчанокопское</span></div>
+        <div class="rl"><b>Астрахань</b><span>Два маршрута без тарифов: левый берег (Царев — Знаменск — Ахтубинск — Харабали — Астрахань) и правый берег (Светлый Яр — Райгород — Черный Яр — Енотаевка — Нариманов — Астрахань). Пункты — во вкладке «Тарифы» со статусом «На проверке».</span></div>
+      </div>
+      <div class="card"><div class="pad"><h3>Работа менеджера</h3></div>
+        <div class="rl"><b>Машины</b><span>Газель — до 2 т, до 6 м. Газон — до 5 т, до 7,5 м.</span></div>
+        <div class="rl"><b>1. Расчёт</b><span>Впишите адрес и выберите машину. Если пункт есть в прайсе — цена сразу.</span></div>
+        <div class="rl"><b>2. Адреса нет</b><span>Сайт подберёт опорную точку и посчитает доплату за километры — цена предварительная.</span></div>
+        <div class="rl"><b>3. Согласование</b><span>Любой адрес вне прайса — цена предварительная: отправьте запрос логисту на согласование.</span></div>
+        <div class="rl"><b>4. После утверждения</b><span>Логист добавляет пункт в тарифы; дальше цена на этот адрес считается сразу.</span></div>
+      </div>
+      <div class="card"><div class="pad"><h3>Дополнительные требования к внедрению</h3></div>
+        <div class="rl"><b>Нормализация справочника</b><span>Разделить составные пункты прайса, устранить дубли, добавить ID и координаты.</span></div>
+        <div class="rl"><b>Навигация</b><span>Получать реальные км с учётом места рейса до и после адреса.</span></div>
+        <div class="rl"><b>Сборные заказы</b><span>Считать общий дополнительный пробег рейса и распределять доплату без двойного начисления.</span></div>
+        <div class="rl"><b>Контроль экономики</b><span>Проверить ставку <span class="js-rate">60</span> ₽/км по себестоимости, загрузке и времени остановок.</span></div>
+        <div class="rl"><b>Новые пункты</b><span>Новые точки имеют статус «На проверке» и не выдаются менеджеру до указания доп. пробега и утверждения цены. Астраханское направление — без тарифов, нужно заполнить базовые цены.</span></div>
+        <div class="rl"><b>Расширение</b><span>Нельзя рассчитывать доп. километраж из расстояния между двумя городами без схемы реального рейса.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TARIFFS -->
+  <section class="view" id="v-tariffs" hidden>
+    <div class="ph">
+      <h1>Тарифы</h1>
+      <div class="ph-sub"><span class="rule"></span>Менеджеры видят только пункты со статусом «Утверждён»</div>
+    </div>
+    <div class="stats">
+      <div class="stat"><label for="sRate">Ставка за доп. км, ₽</label><input id="sRate" type="number" min="0" step="1"></div>
+      <div class="stat"><label for="sStep">Округление вверх до, ₽</label><input id="sStep" type="number" min="1" step="1"></div>
+      <div class="stat"><label for="sThr">Согласовать, если доп. пробег больше, км</label><input id="sThr" type="number" min="0" step="1"></div>
+    </div>
+    <div class="filters">
+      <div class="chips" id="dirChips"></div>
+      <div class="row" style="flex:1 1 320px;justify-content:flex-end">
+        <label class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="tSearch" type="search" placeholder="Найти пункт"></label>
+        <button class="btn primary" id="addPoint" type="button">Добавить пункт</button>
+      </div>
+    </div>
+    <div class="card tbl-card">
+      <table>
+        <thead><tr><th>Направление</th><th>Населённый пункт</th><th>Другие названия</th><th>Опорная точка</th><th class="n">Доп. км</th><th class="n">Газель, ₽</th><th class="n">Газон, ₽</th><th>Статус</th><th></th></tr></thead>
+        <tbody id="tBody"></tbody>
+      </table>
+    </div>
+    <div class="row" id="backupRow" hidden style="margin-top:14px"><button class="btn sm" type="button" id="bkSave">Скачать резервную копию</button><label class="btn sm" for="bkLoad">Загрузить резервную копию</label><input type="file" id="bkLoad" accept=".json,application/json" hidden></div>
+    <p class="note foot-note"><span id="tCount"></span> · «Другие названия» — как ещё пишут пункт в адресе (опечатки, старые и народные названия), через запятую. Кнопка «Пересчитать» в строке считает цены от опорной точки: тариф точки + доп. км × ставка, с округлением вверх.</p>
+  </section>
+</main>
+<div id="toast" role="status" hidden></div>
+
+  <script src="js/data.js"></script>
+  <script src="js/local-db.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
