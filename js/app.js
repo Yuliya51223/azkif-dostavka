@@ -139,137 +139,149 @@ const kmAllowed = dir => !NO_KM_DIRS.has(dir);
 const NO_KM_TEXT = "Для Волгограда доплата за километры не применяется — цену адреса вне списка назначает логист.";
 
 /* ---------- manager calc ---------- */
-$$(".car").forEach(b => b.onclick = () => {
-  S.car = b.dataset.car;
-  $$(".car").forEach(x => x.setAttribute("aria-pressed", x===b));
+// Менеджер: направление + адрес + машина. Опорную точку, км и расчёт система определяет сама.
+const dirsForManager = () => DIR_ORDER.filter(d=>approved().some(p=>p.dir===d)).concat([...new Set(approved().map(p=>p.dir))].filter(d=>d&&!DIR_ORDER.includes(d)));
+function fillDirSelect(){
+  const sel = $("#dir"), cur = sel.value;
+  const dirs = dirsForManager();
+  sel.innerHTML = `<option value="">— выберите —</option>` + dirs.map(d=>`<option${d===cur?" selected":""}>${esc(d)}</option>`).join("");
+}
+$("#car").onchange = () => {
+  S.car = $("#car").value;
   if (!S.last) return;
-  if (S.last.kind === "approved" || S.last.kind === "notfound") { $("#calcForm").requestSubmit(); return; }
+  if (S.last.kind === "approved") { $("#calcForm").requestSubmit(); return; }
   recalcLast();
-});
+};
+$("#dir").onchange = () => { S.last = null; renderResult(); };
+$("#addr").oninput = () => { if (S.last) { S.last = null; renderResult(); } };
 function recalcLast(){
   const r = S.last; r.car = S.car;
   if (r.kind === "price") r.total = priceOf(r.point, S.car);
   if (r.kind === "estimate"){ r.tariff = priceOf(r.basePoint, S.car); r.extra = r.km * S.settings.rate; r.total = r.tariff==null?null:ceilStep(r.tariff + r.extra, S.settings.step); }
-  if (r.kind === "approved") { /* fixed answer is per car; keep */ }
+  if (r.kind === "nokm") r.tariff = priceOf(r.basePoint, S.car);
   renderResult();
 }
 
 $("#calcForm").onsubmit = async e => {
   e.preventDefault();
-  const addr = $("#addr").value.trim(); if (!addr) return;
+  const dir = $("#dir").value, addr = $("#addr").value.trim();
+  if (!dir){ toast("Выберите направление"); $("#dir").focus(); return; }
+  if (!addr){ $("#addr").focus(); return; }
+  S.car = $("#car").value;
   const btn = $("#goBtn");
   S.last = null;
-  // 1) already approved request for this address and car
+  // 1) этот адрес уже согласован логистом
   const prev = S.requests.find(r => r.status==="approved" && norm(r.address)===norm(addr) && r.car===S.car && r.finalPrice);
-  if (prev){ S.last = {kind:"approved", address:addr, car:S.car, total:prev.finalPrice, comment:prev.logistComment}; return renderResult(); }
-  // 2) price list
-  const m = findMatches(addr);
-  if (m.length === 1){ S.last = {kind:"price", address:addr, car:S.car, point:m[0], total:priceOf(m[0], S.car)}; return renderResult(); }
-  if (m.length > 1){ S.last = {kind:"choose", address:addr, car:S.car, options:m}; return renderResult(); }
-  // 3) ask Claude for nearest base and distance
-  if (!S.sample){ S.last = {kind:"notfound", address:addr, car:S.car}; return renderResult(); }
-  btn.disabled = true; btn.textContent = "Ищу адрес и считаю расстояние…";
-  $("#result").hidden = false;
-  $("#result").innerHTML = `<div class="res"><div class="res-status st-info">Адреса нет в прайсе — определяю ближайшую тарифную точку</div><div class="res-body"><div class="note">Обычно 10–30 секунд.</div></div></div>`;
+  if (prev){ S.last = {kind:"approved", dir, address:addr, car:S.car, total:prev.finalPrice, comment:prev.logistComment, base:prev.base, km:prev.km, locality:prev.locality}; return renderResult(); }
+  // 2) прайс выбранного направления
+  const all = findMatches(addr);
+  const m = all.filter(p => p.dir === dir);
+  if (m.length === 1){ S.last = {kind:"price", dir, address:addr, car:S.car, point:m[0], total:priceOf(m[0], S.car)}; return renderResult(); }
+  if (m.length > 1){ S.last = {kind:"choose", dir, address:addr, car:S.car, options:m}; return renderResult(); }
+  if (all.length){ S.last = {kind:"otherdir", dir, address:addr, car:S.car, options:all}; return renderResult(); }
+  // 3) опорная точка и км внутри направления
+  if (!S.sample){ S.last = {kind:"notfound", dir, address:addr, car:S.car, comment:"Автоматическое определение опорной точки недоступно в этой версии."}; return renderResult(); }
+  btn.disabled = true; btn.textContent = "Определяю опорную точку…";
+  S.last = {kind:"wait", dir, address:addr, car:S.car}; renderResult();
   try {
-    const ans = await S.sample.json(buildPrompt(addr), {modelTier:"default"});
+    const ans = await S.sample.json(buildPrompt(addr, dir), {modelTier:"default"});
     if (!ans || ans.found === false || !ans.base){
-      S.last = {kind:"notfound", address:addr, car:S.car, comment: ans?.comment || ""};
+      S.last = {kind:"notfound", dir, address:addr, car:S.car, locality:ans?.locality, comment: ans?.comment || "Адрес не удалось привязать к пунктам направления."};
     } else {
-      const bp = findBase(ans.direction, ans.base);
+      const bp = findBase(dir, ans.base);
       const km = Math.max(0, Math.round(Number(ans.km)||0));
-      if (!bp) S.last = {kind:"notfound", address:addr, car:S.car, comment:"Не удалось сопоставить с прайсом: "+ (ans.base||"")};
-      else if (!kmAllowed(bp.dir)) S.last = {kind:"notfound", address:addr, car:S.car, dir:bp.dir, base:bp.name, locality:ans.locality, km, comment:`Ближайший пункт — «${bp.name}» (Волгоград). ${NO_KM_TEXT}`};
+      if (!bp || bp.dir !== dir) S.last = {kind:"notfound", dir, address:addr, car:S.car, locality:ans.locality, comment:`Опорная точка «${ans.base||""}» не найдена в прайсе направления «${dir}».`};
+      else if (!kmAllowed(dir)) S.last = {kind:"nokm", dir, address:addr, car:S.car, locality:ans.locality, region:ans.region, base:bp.name, basePoint:bp, km, tariff:priceOf(bp,S.car), comment:ans.comment||""};
       else {
         const tariff = priceOf(bp, S.car), extra = km * S.settings.rate;
-        S.last = {kind:"estimate", address:addr, car:S.car, locality:ans.locality, region:ans.region, dir:bp.dir, base:bp.name, basePoint:bp,
+        S.last = {kind:"estimate", dir, address:addr, car:S.car, locality:ans.locality, region:ans.region, base:bp.name, basePoint:bp,
           km, tariff, extra, total: tariff==null?null:ceilStep(tariff+extra, S.settings.step),
           confidence: ans.confidence || "medium", comment: ans.comment || ""};
       }
     }
   } catch(err){
-    S.last = {kind:"notfound", address:addr, car:S.car, err: err?.code};
+    S.last = {kind:"notfound", dir, address:addr, car:S.car, err: err?.code, comment: err?.code==="not_granted" ? "Автоматическое определение не разрешено в этом окне." : "Не получилось определить опорную точку."};
     if (err?.code === "not_granted" || err?.code === "sampling_disabled") S.sample = null;
   } finally { btn.disabled = false; btn.textContent = "Рассчитать"; }
   renderResult();
 };
 
-function buildPrompt(addr){
-  const byDir = {};
-  for (const p of approved()) (byDir[p.dir] ||= []).push(p.name);
-  const list = DIR_ORDER.filter(d=>byDir[d]).concat(Object.keys(byDir).filter(d=>!DIR_ORDER.includes(d)))
-    .map(d => `${d}: ${byDir[d].join("; ")}`).join("\n");
-  return `Ты логист компании АЗКиФ. Склад: г. Волгоград, ул. Ясноморская, 2. Машины ездят по направлениям; у каждого направления есть пункты прайса с фиксированной ценой.
-Направления и пункты прайса (пункты разделены «;»):
-${list}
-
+const ROUTE_ROSTOV = "Схема Ростовского направления (из прайса): основная ветка Волгоград → Новый Рогачик → Калач → Суровикино → Обливская → Морозовск → Белая Калитва → Лиховской → Шахты → Новочеркасск → Аксай → Ростов-на-Дону → Батайск → Зерноград; от Обливской/Морозовска на запад: Советская, Боковская, Вешенская, Кашары, Миллерово, Чертково, Глубокий, Каменск-Шахтинский, Донецк; у Шахт — Новошахтинск; вторая ветка Волгоград → Червлёное → Абганерово → Октябрьский → Котельниково → Дубовское → Волгодонск → Семикаракорск → Багаевская, Егорлыкская; третья ветка Зимовники → Пролетарск → Сальск → Песчанокопское.";
+function buildPrompt(addr, dir){
+  const names = approved().filter(p=>p.dir===dir).map(p=>p.name).join("; ");
+  return `Ты логист компании АЗКиФ. Склад: г. Волгоград, ул. Ясноморская, 2. Машина едет по направлению «${dir}».
+Пункты прайса этого направления (разделены «;»): ${names}
+${dir==="Ростов" ? "\n"+ROUTE_ROSTOV+"\n" : ""}
 Адрес клиента: «${addr}»
 
 Задача:
 1. Определи населённый пункт и регион клиента (исправь опечатки).
-2. Если этот населённый пункт есть в списке — верни его название как base и km = 0.
-3. Иначе выбери направление и опорный пункт из списка, от которого машине ближе всего заехать к клиенту по дороге (обычно последний пункт прайса по пути из Волгограда перед съездом к клиенту).
-4. km — расстояние по автодороге от опорного пункта до клиента в одну сторону, целое число.
-5. Если адрес не понять или он далеко от всех направлений — found = false.
-
-Схема Ростовского направления (из прайса): основная ветка Волгоград → Новый Рогачик → Калач → Суровикино → Обливская → Морозовск → Белая Калитва → Лиховской → Шахты → Новочеркасск → Аксай → Ростов-на-Дону → Батайск → Зерноград; от Обливской/Морозовска на запад: Советская, Боковская, Вешенская, Кашары, Миллерово, Чертково, Глубокий, Каменск-Шахтинский, Донецк; у Шахт — Новошахтинск; вторая ветка Волгоград → Червлёное → Абганерово → Октябрьский → Котельниково → Дубовское → Волгодонск → Семикаракорск → Багаевская, Егорлыкская; третья ветка Зимовники → Пролетарск → Сальск → Песчанокопское.
+2. Выбери из списка выше опорный пункт — ближайший по дороге пункт прайса, от которого машине заехать к клиенту (обычно последний пункт по пути из Волгограда перед съездом к клиенту).
+3. km — расстояние по автодороге от опорного пункта до клиента в одну сторону, целое число.
+4. Если адрес не понять или он не по этому направлению — found = false и в comment напиши, по какому направлению он скорее.
 
 Ответь только JSON без пояснений:
-{"found":true,"locality":"Яшкуль","region":"Калмыкия","direction":"Элиста","base":"Элиста","km":89,"confidence":"high","comment":"Элиста → Яшкуль по трассе Р-22"}
-direction и base — точно как в списке. confidence: high, medium или low.`;
+{"found":true,"locality":"Яшкуль","region":"Калмыкия","base":"Элиста","km":89,"confidence":"high","comment":"Элиста → Яшкуль по трассе Р-22"}
+base — точно как в списке. confidence: high, medium или low.`;
 }
 
 function chooseOption(i){
   const p = S.last.options[i];
-  S.last = {kind:"price", address:S.last.address, car:S.car, point:p, total:priceOf(p,S.car)};
+  if (p.dir !== $("#dir").value) $("#dir").value = p.dir;
+  S.last = {kind:"price", dir:p.dir, address:S.last.address, car:S.car, point:p, total:priceOf(p,S.car)};
   renderResult();
 }
 
+const badge = (cls, t) => `<span class="badge ${cls}"><i></i>${t}</span>`;
 function renderResult(){
-  const r = S.last, box = $("#result");
-  if (!r){ box.hidden = true; return; }
-  box.hidden = false;
-  const car = CARS[r.car];
-  let status, c, body = "", canSend = true, dark = true;
-  if (r.kind === "price"){
-    c = "#4ADE80"; status = "Цена по прайсу — можно называть клиенту";
-    body = `<div class="place">Пункт прайса: <b>${esc(r.point.name)}</b> · направление ${esc(r.point.dir)}</div>
-      <div class="big-n">${rub(r.total)}<small>${car}</small></div>
-      ${r.point.base && r.point.km ? `<div class="t-rule"></div><div class="t-row"><span>Опорная точка</span><b>${esc(r.point.base)} + ${r.point.km} км</b></div>`:""}`;
-    canSend = r.total == null;
-    if (r.total == null){ c="#FBBF24"; status="Для этой машины цены в прайсе нет — согласуйте с логистом"; }
-  } else if (r.kind === "approved"){
-    c = "#4ADE80"; status = "Цена согласована логистом";
-    body = `<div class="big-n">${rub(r.total)}<small>${car}</small></div>${r.comment?`<div class="note">Комментарий логиста: ${esc(r.comment)}</div>`:""}`;
-    canSend = false;
-  } else if (r.kind === "choose"){
-    dark = false; c = "var(--brand)"; status = "Нашлось несколько пунктов — выберите нужный";
-    body = `<div class="choices">${r.options.map((p,i)=>`<button type="button" class="choice" data-i="${i}"><span><b>${esc(p.name)}</b> <span class="muted">· ${esc(p.dir)}</span></span><b>${rub(priceOf(p,r.car))}</b></button>`).join("")}</div>`;
-    canSend = false;
-  } else if (r.kind === "estimate"){
-    const need = true; // как в таблице: любой адрес вне прайса — согласовать с логистом
-    r.need = need;
-    c = need ? "#FBBF24" : "#93C5FD";
-    status = "Предварительная цена — согласуйте с логистом";
-    body = `<div class="place">Клиент: <b>${esc(r.locality||r.address)}</b>${r.region?` · ${esc(r.region)}`:""}</div>
-      <div class="big-n">${rub(r.total)}<small>${car}</small></div>
-      <div class="t-rule"></div>
-      <div>
-        <div class="t-row"><span>Тариф точки «${esc(r.base)}» · ${esc(r.dir)}</span><b>${rub(r.tariff)}</b></div>
-        <div class="t-row"><span>Доплата: ${r.km} км × ${S.settings.rate} ₽</span><b>${rub(r.extra)}</b></div>
-        <div class="t-row"><span>Округление вверх до ${S.settings.step} ₽</span><b>${rub(r.total)}</b></div>
-      </div>
-      <div class="note">Расстояние оценено автоматически${r.comment?`: ${esc(r.comment)}`:""}. Адреса нет в прайсе — цену подтверждает логист.</div>`;
-  } else {
-    dark = false; c = "var(--red)"; status = "Адреса нет в прайсе";
-    body = `<div class="note">${r.err==="not_granted"?"Автоматический поиск адреса не разрешён в этом окне. ":""}Отправьте адрес логисту — он посчитает цену, ответ появится ниже в «Мои запросы».${r.comment?`<br>${esc(r.comment)}`:""}</div>`;
+  const r = S.last;
+  $("#sRateV").textContent = S.settings.rate;
+  $("#sStepV").textContent = S.settings.step;
+  const set = (id, v) => { $(id).textContent = (v==null || v==="") ? "—" : v; };
+  const box = $("#rExtraBox");
+  if (!r){
+    ["#rBase","#rExtra","#rTotal","#sPlace","#sBase","#sKm","#sState"].forEach(id=>set(id,null));
+    $("#rStatus").innerHTML = badge("b-chk","Введите адрес");
+    $("#sNote").textContent = ""; box.hidden = true; box.innerHTML = ""; return;
   }
-  const send = canSend ? `<div class="send">
-      <label class="fl" for="reqNote">Комментарий для логиста (необязательно)</label>
+  const num = v => v==null ? null : Math.round(v).toLocaleString("ru-RU");
+  let base=null, extra=null, total=null, st, place=null, bpt=null, km=null, state, note="", extraHtml="", canSend=false;
+  if (r.kind === "wait"){
+    st = badge("b-info","Определяю…"); state = "Определяется…"; note = "Адреса нет в прайсе направления — подбираю опорную точку и расстояние. Обычно 10–30 секунд.";
+  } else if (r.kind === "price"){
+    const p = r.point;
+    base = r.total; extra = 0; total = r.total; place = p.name; bpt = p.base ? `${p.base} (${p.dir})` : `${p.name} (${p.dir})`; km = p.base && p.km ? p.km : 0;
+    state = "Точный адрес из прайса";
+    if (r.total == null){ st = badge("b-new","СОГЛАСОВАТЬ С ЛОГИСТОМ"); note = `Для машины «${CARS[r.car]}» цены в прайсе нет.`; canSend = true; }
+    else { st = badge("b-ok","ЦЕНА ГОТОВА"); note = p.base && p.km ? `Пункт утверждён логистом: ${p.base} + ${p.km} км. Цену можно называть клиенту.` : "Цену можно называть клиенту."; }
+  } else if (r.kind === "approved"){
+    base = null; extra = null; total = r.total; place = r.locality || r.address; bpt = r.base; km = r.km;
+    st = badge("b-ok","ЦЕНА ГОТОВА"); state = "Согласовано логистом"; note = r.comment ? `Комментарий логиста: ${r.comment}` : "";
+  } else if (r.kind === "choose" || r.kind === "otherdir"){
+    st = badge("b-info","ВЫБЕРИТЕ ПУНКТ"); state = "Несколько вариантов";
+    note = r.kind === "otherdir" ? `В направлении «${r.dir}» такого пункта нет, но он есть в прайсе другого направления.` : "Адрес подходит к нескольким пунктам прайса.";
+    extraHtml = `<div class="fl">${r.kind==="otherdir"?"Найдено в другом направлении":"Выберите пункт"}</div><div class="choices">${r.options.map((p,i)=>`<button type="button" class="choice" data-i="${i}"><span><b>${esc(p.name)}</b> <span class="muted">· ${esc(p.dir)}</span></span><b>${rub(priceOf(p,r.car))}</b></button>`).join("")}</div>`;
+  } else if (r.kind === "estimate"){
+    base = r.tariff; extra = r.extra; total = r.total; place = r.locality ? r.locality + (r.region?`, ${r.region}`:"") : r.address; bpt = `${r.base} (${r.dir})`; km = r.km;
+    st = badge("b-new","СОГЛАСОВАТЬ С ЛОГИСТОМ"); state = "Предварительно";
+    note = `Опорная точка и расстояние определены автоматически${r.comment?`: ${r.comment}`:""}. Доплата: ${r.km} км × ${S.settings.rate} ₽, округление вверх до ${S.settings.step} ₽.`;
+    canSend = true;
+  } else if (r.kind === "nokm"){
+    base = r.tariff; extra = null; total = null; place = r.locality ? r.locality + (r.region?`, ${r.region}`:"") : r.address; bpt = `${r.base} (${r.dir})`; km = r.km;
+    st = badge("b-new","СОГЛАСОВАТЬ С ЛОГИСТОМ"); state = "Предварительно";
+    note = `${NO_KM_TEXT}${r.comment?` ${r.comment}`:""}`; canSend = true;
+  } else {
+    place = r.locality || null;
+    st = badge("b-bad","ЗАПРОС ЛОГИСТУ"); state = "Не определён"; note = r.comment || ""; canSend = true;
+  }
+  set("#rBase", num(base)); set("#rExtra", num(extra)); set("#rTotal", total==null ? null : num(total));
+  $("#rStatus").innerHTML = st;
+  set("#sPlace", place); set("#sBase", bpt); set("#sKm", km); set("#sState", state);
+  $("#sNote").textContent = note;
+  if (canSend) extraHtml += `<label class="fl" for="reqNote">Комментарий для логиста (необязательно)</label>
       <textarea class="inp" id="reqNote" placeholder="Например: клиент ждёт ответа до 15:00"></textarea>
-      <div class="row"><button type="button" class="btn ${r.kind==="estimate"&&!r.need?"":"primary"}" id="sendReq">Отправить на согласование</button><span id="sendState"></span></div>
-    </div>` : "";
-  box.innerHTML = `<div class="res${dark?"":" light"}"><span class="res-status" style="--c:${c}"><i></i>${status}</span>${body}${send}</div>`;
+      <div class="row"><button type="button" class="btn primary" id="sendReq">Отправить на согласование</button><span id="sendState"></span></div>`;
+  box.innerHTML = extraHtml; box.hidden = !extraHtml;
   box.querySelectorAll(".choice").forEach(b => b.onclick = () => chooseOption(+b.dataset.i));
   const sb = $("#sendReq"); if (sb) sb.onclick = sendRequest;
 }
@@ -277,7 +289,7 @@ function renderResult(){
 async function sendRequest(){
   const r = S.last; if (!r || !S.db) { toast("Нет связи с базой — попробуйте позже"); return; }
   const btn = $("#sendReq"); btn.disabled = true;
-  const doc = { address:r.address, car:r.car, kind:r.kind, managerId:S.me||null, managerNote:$("#reqNote")?.value.trim()||"",
+  const doc = { address:r.address, car:r.car, managerDir:r.dir||null, kind:r.kind, managerId:S.me||null, managerNote:$("#reqNote")?.value.trim()||"",
     createdAt:Date.now(), status:"new",
     locality:r.locality||null, dir:r.dir||r.point?.dir||null, base:r.base||r.point?.name||null,
     km:r.km ?? null, estimate:r.total ?? null, confidence:r.confidence||null, autoComment:r.comment||null };
@@ -496,9 +508,9 @@ async function init(){
   db.collection("points").orderBy("order").onSnapshot(snap => {
     if (!snap.metadata.fromCache){ clearTimeout(timer); $("#netNote").hidden=true; }
     S.points = snap.docs.map(d=>({id:d.id, ...d.data()}));
-    renderChips(); if (!S.editing) renderTable(); fillTripSelects(); renderTrip();
+    renderChips(); if (!S.editing) renderTable(); fillTripSelects(); renderTrip(); fillDirSelect();
   }, ()=>{ clearTimeout(timer); });
-  db.doc("settings/main").onSnapshot(s => { if (s.exists) S.settings = {...S.settings, ...s.data()}; renderSettings(); renderTrip(); renderRulesNums(); if (S.last && S.last.kind==="estimate") recalcLast(); }, ()=>{});
+  db.doc("settings/main").onSnapshot(s => { if (s.exists) S.settings = {...S.settings, ...s.data()}; renderSettings(); renderTrip(); renderRulesNums(); if (S.last) recalcLast(); else renderResult(); }, ()=>{});
   db.collection("requests").orderBy("createdAt","desc").limit(300).onSnapshot(snap => {
     S.requests = snap.docs.map(d=>({id:d.id, ...d.data()}));
     renderMine(); renderReqs(); resolveNames();
@@ -596,6 +608,6 @@ function renderRulesNums(){
 }
 
 renderReqs();
-fillTripSelects(); renderTrip(); renderRulesNums();
+fillTripSelects(); renderTrip(); renderRulesNums(); fillDirSelect(); renderResult();
 init();
 })();

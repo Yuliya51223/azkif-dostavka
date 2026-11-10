@@ -28,27 +28,65 @@
 
   <!-- MANAGER -->
   <section class="view" id="v-calc">
-    <div class="calc">
-      <div class="ph">
-        <h1>Стоимость доставки</h1>
-        <div class="ph-sub"><span class="rule"></span>Впишите адрес клиента и выберите машину</div>
-      </div>
-      <form class="card pad" id="calcForm" autocomplete="off">
-        <label class="fl" for="addr">Адрес клиента</label>
-        <input class="inp big" id="addr" placeholder="Например: Яшкуль, ул. Ленина, 5" required>
-        <div class="hint">Достаточно населённого пункта. Улица и дом — по желанию.</div>
-        <div class="cars" role="group" aria-label="Машина">
-          <button type="button" class="car" data-car="gazel" aria-pressed="true"><b>Газель</b><span>до 2 т, до 6 м</span></button>
-          <button type="button" class="car" data-car="gazon" aria-pressed="false"><b>Газон</b><span>до 5 т, до 7,5 м</span></button>
-        </div>
-        <button class="btn primary big go" id="goBtn" type="submit">Рассчитать</button>
-      </form>
-      <div class="result" id="result" hidden></div>
+    <div class="ph">
+      <h1>Калькулятор доставки по адресу</h1>
+      <div class="ph-sub"><span class="rule"></span>Менеджер заполняет только три поля — опорную точку, км и расчёт система определяет сама</div>
+    </div>
+    <div class="mgr">
+      <div class="mgr-main">
+        <form class="card sheet" id="calcForm" autocomplete="off">
+          <div class="sh-head">Менеджер заполняет только три поля</div>
+          <div class="sh-row in">
+            <label for="dir">Направление</label>
+            <select class="inp" id="dir" required></select>
+          </div>
+          <div class="sh-row in">
+            <label for="addr">Полный адрес клиента</label>
+            <input class="inp" id="addr" placeholder="Например: Яшкуль, ул. Ленина, 5" required>
+          </div>
+          <div class="sh-row in">
+            <label for="car">Автомобиль</label>
+            <select class="inp" id="car">
+              <option value="gazel">Газель — до 2 т, до 6 м</option>
+              <option value="gazon">Газон — до 5 т, до 7,5 м</option>
+            </select>
+          </div>
+          <div class="sh-act"><button class="btn primary" id="goBtn" type="submit">Рассчитать</button></div>
+        </form>
 
-      <div class="mine">
-        <h2>Мои запросы на согласование</h2>
-        <div class="list" id="mineList"><div class="empty">Здесь появятся адреса, отправленные логисту, и его ответ.</div></div>
+        <div class="card sheet res-sheet" id="resSheet">
+          <div class="sh-head">Результат расчёта</div>
+          <div class="sh-row"><span>Базовый тариф, ₽</span><b class="mono" id="rBase">—</b></div>
+          <div class="sh-row"><span>Доплата за адрес, ₽</span><b class="mono" id="rExtra">—</b></div>
+          <div class="sh-row total"><span>Стоимость доставки, ₽</span><b class="mono" id="rTotal">—</b></div>
+          <div class="sh-row"><span>Статус</span><span id="rStatus"><span class="badge b-chk"><i></i>Введите адрес</span></span></div>
+          <div class="sh-extra" id="rExtraBox" hidden></div>
+        </div>
       </div>
+
+      <aside class="card sheet svc">
+        <div class="sh-head">Служебные данные для автоматизации</div>
+        <div class="sh-row"><span>Найденный населённый пункт</span><b id="sPlace">—</b></div>
+        <div class="sh-row"><span>Опорная тарифная точка</span><b id="sBase">—</b></div>
+        <div class="sh-row"><span>Расстояние от опорной точки до клиента, км</span><b class="mono" id="sKm">—</b></div>
+        <div class="sh-row"><span>Статус определения адреса</span><b id="sState">—</b></div>
+        <div class="sh-row"><span>Ставка за км, ₽</span><b class="mono" id="sRateV">60</b></div>
+        <div class="sh-row"><span>Шаг округления, ₽</span><b class="mono" id="sStepV">100</b></div>
+        <div class="sh-note" id="sNote"></div>
+      </aside>
+    </div>
+
+    <div class="card sheet principles">
+      <div class="sh-head">Принцип расчёта</div>
+      <div class="pr">Адрес в утверждённом прайсе — фиксированная цена.</div>
+      <div class="pr">Адрес вне прайса — тариф опорной точки + <span class="js-rate">60</span> ₽ за километр в одну сторону, округление вверх до <span class="js-step">100</span> ₽.</div>
+      <div class="pr">Волгоград — только фиксированные тарифы; адрес вне городского списка согласует логист.</div>
+      <div class="pr">Нестандартные адреса — предварительная цена до подтверждения логистом.</div>
+    </div>
+
+    <div class="mine">
+      <h2>Мои запросы на согласование</h2>
+      <div class="list" id="mineList"><div class="empty">Здесь появятся адреса, отправленные логисту, и его ответ.</div></div>
     </div>
   </section>
 
